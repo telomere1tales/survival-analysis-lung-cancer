@@ -1,0 +1,297 @@
+---
+title: "Survival Analysis - Lung Cancer"
+author: "Noelia Caba Martin"
+date: "2026-03-17"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## Introduction
+
+This analysis explores survival patterns in patients with advanced lung cancer 
+using the `lung` dataset from the `survival` package in R. 
+
+The dataset contains clinical data from 228 patients, including survival time, 
+censoring status, and several clinical variables.
+
+The main objectives are:
+
+- Estimate overall survival using Kaplan-Meier curves
+- Compare survival between groups using the log-rank test
+- Identify prognostic factors using Cox regression
+
+## Setup
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+```{r libraries}
+library(survival)
+library(survminer)
+library(ggplot2)
+```
+## Data Exploration
+```{r load-data}
+data(lung)
+head(lung)
+```
+```{r data-summary}
+dim(lung)
+str(lung)
+summary(lung)
+```
+
+The dataset contains **228 patients** and **10 variables**. 
+Key variables for survival analysis are `time` (survival time in days) 
+and `status` (1 = censored, 2 = dead).
+
+Notable missing data: `meal.cal` has 47 missing values (20.6%) 
+and `wt.loss` has 14 missing values (6.1%).
+
+## Kaplan-Meier Analysis
+```{r kaplan-meier}
+# Create survival object
+surv_object <- Surv(time = lung$time, event = lung$status == 2)
+
+# Fit Kaplan-Meier model
+km_fit <- survfit(surv_object ~ 1, data = lung)
+
+# Summary at key timepoints
+summary(km_fit, times = c(180, 365, 540, 720))
+```
+```{r km-plot}
+ggsurvplot(
+  km_fit,
+  data = lung,
+  risk.table = TRUE,
+  pval = FALSE,
+  conf.int = TRUE,
+  xlab = "Time (days)",
+  ylab = "Survival probability",
+  title = "Overall Survival - Lung Cancer Patients",
+  ggtheme = theme_minimal()
+)
+```
+
+The Kaplan-Meier curve shows a steep decline in survival probability during 
+the first year, with a median survival time of approximately 305 days. 
+
+At 6 months, 72.2% of patients were still alive (95% CI: 66.5% - 78.3%).
+At 1 year, survival dropped to 40.9% (95% CI: 34.5% - 48.6%).
+At 2 years, only 12.5% of patients remained alive (95% CI: 7.9% - 19.7%).
+
+The wide confidence intervals at later timepoints reflect the small number 
+of patients remaining at risk, which reduces the precision of the estimates.
+
+## Survival by Sex
+
+A key clinical question is whether survival differs between male and female 
+patients with advanced lung cancer.
+
+**Hypothesis:**
+
+- **H₀ (null hypothesis):** There is no difference in survival between male 
+and female patients
+- **H₁ (alternative hypothesis):** There is a statistically significant 
+difference in survival between male and female patients
+
+The log-rank test will be used to compare the two survival curves, with a 
+significance threshold of α = 0.05.
+
+```{r km-by-sex}
+# Fit Kaplan-Meier by sex
+km_sex <- survfit(surv_object ~ sex, data = lung)
+
+# Plot
+ggsurvplot(
+  km_sex,
+  data = lung,
+  risk.table = TRUE,
+  pval = TRUE,
+  conf.int = TRUE,
+  xlab = "Time (days)",
+  ylab = "Survival probability",
+  title = "Survival by Sex - Lung Cancer Patients",
+  legend.labs = c("Male", "Female"),
+  palette = c("#E7B800", "#2E9FDF"),
+  ggtheme = theme_minimal()
+)
+```
+
+While the Kaplan-Meier analysis allows us to compare survival between groups, 
+it can only evaluate one variable at a time. Cox proportional hazards regression 
+allows us to assess the effect of multiple variables simultaneously, adjusting 
+for potential confounders.
+
+The key output of Cox regression is the **Hazard Ratio (HR)**:
+
+- **HR = 1:** no effect on survival
+- **HR > 1:** increased risk of death
+- **HR < 1:** reduced risk of death (protective factor)
+
+**Hypothesis:**
+
+- **H₀:** None of the included variables (age, sex, ECOG status) are associated 
+with survival
+- **H₁:** At least one variable is significantly associated with survival
+
+The following variables were selected based on clinical relevance and 
+data completeness:
+
+- **Age:** continuous variable, measured in years
+- **Sex:** binary variable (1 = male, 2 = female)
+- **ECOG performance status:** ordinal scale measuring patient functional 
+status (0 = asymptomatic, 4 = bedridden)
+
+```{r cox-regression}
+# Fit Cox model
+cox_fit <- coxph(surv_object ~ age + sex + ph.ecog, data = lung)
+
+# Summary
+summary(cox_fit)
+```
+
+The Cox regression model was fitted on 227 patients (1 observation deleted 
+due to missing data). A total of 164 events (deaths) were observed.
+
+**Results:**
+
+The model shows good overall fit, with all three global tests highly significant 
+(p = 1×10⁻⁶), indicating that the included variables jointly predict survival.
+
+- **Age** (HR = 1.011, 95% CI: 0.993 - 1.030, p = 0.232): Age was not a 
+significant predictor of survival after adjusting for sex and ECOG status. 
+Each additional year of age was associated with only a 1.1% increase in 
+the hazard of death.
+
+- **Sex** (HR = 0.575, 95% CI: 0.414 - 0.799, p = 0.001): Female sex was 
+associated with a 42.5% reduction in the hazard of death compared to males, 
+after adjusting for age and ECOG status. This is a statistically significant 
+and clinically meaningful finding.
+
+- **ECOG performance status** (HR = 1.590, 95% CI: 1.273 - 1.986, p < 0.001): 
+Each one-unit increase in ECOG score was associated with a 59% increase in 
+the hazard of death. This was the strongest prognostic factor in the model.
+
+The model concordance of 0.637 indicates moderate discriminative ability, 
+which is typical for clinical survival models.
+
+**Conclusion:** After adjusting for confounders, sex and ECOG performance 
+status are independent prognostic factors for survival in advanced lung cancer 
+patients, while age did not reach statistical significance in this model.
+
+The results of the Cox regression are visualized below using a **forest plot**, 
+which is the standard representation in clinical publications. 
+
+Each variable is displayed with its Hazard Ratio (point estimate) and 
+95% confidence interval (horizontal line). The vertical dashed line at 
+HR = 1 represents the reference value of no effect:
+
+- Variables with the confidence interval entirely to the **left of 1** are 
+protective (reduce the risk of death)
+- Variables with the confidence interval entirely to the **right of 1** 
+increase the risk of death
+- Variables whose confidence interval **crosses 1** are not statistically 
+significant.
+
+```{r forest-plot}
+ggforest(
+  cox_fit,
+  data = lung,
+  main = "Hazard Ratios - Cox Regression Model",
+  cpositions = c(0.02, 0.22, 0.4),
+  fontsize = 0.9,
+  refLabel = "Reference",
+  noDigits = 2
+)
+```
+
+The forest plot confirms the results from the Cox regression table:
+
+- **Age** is not a significant prognostic factor (HR = 1.01, p = 0.232), 
+as its confidence interval crosses the line of no effect (HR = 1)
+- **Sex** is a significant protective factor (HR = 0.58, p < 0.001), 
+with the entire confidence interval to the left of HR = 1
+- **ECOG performance status** is the strongest risk factor (HR = 1.59, 
+p < 0.001), with the entire confidence interval to the right of HR = 1
+
+## Verification of Cox Model Assumptions
+
+The Cox proportional hazards model relies on a key assumption: the hazard 
+ratios must remain **constant over time** (proportional hazards assumption). 
+If this assumption is violated for any variable, the model results for that 
+variable may not be reliable.
+
+The proportional hazards assumption is tested using **Schoenfeld residuals**. 
+For each variable, the test evaluates:
+
+- **H₀:** The proportional hazards assumption holds (HR is constant over time)
+- **H₁:** The proportional hazards assumption is violated (HR changes over time)
+
+A p-value > 0.05 indicates that the assumption is met for that variable.
+
+```{r cox-assumptions}
+# Test proportional hazards assumption
+ph_test <- cox.zph(cox_fit)
+
+# Print results
+print(ph_test)
+
+# Plot Schoenfeld residuals
+ggcoxzph(ph_test)
+```
+
+The Schoenfeld residuals test confirms that the proportional hazards 
+assumption is met for all variables:
+
+- **Age** (p = 0.665): assumption holds ✓
+- **Sex** (p = 0.129): assumption holds ✓
+- **ECOG status** (p = 0.152): assumption holds ✓
+- **Global test** (p = 0.216): the model as a whole satisfies the 
+proportional hazards assumption ✓
+
+The graphical inspection of Schoenfeld residuals confirms these results, 
+with all variables showing approximately horizontal smoothed lines over 
+time, indicating stable hazard ratios throughout the follow-up period.
+
+**Conclusion:** The proportional hazards assumption is not violated, 
+validating the use of the Cox model for this dataset.
+
+## Conclusions
+
+This analysis demonstrates the application of standard survival analysis 
+methods to real clinical data from patients with advanced lung cancer.
+
+**Key findings:**
+
+1. The median overall survival was approximately 305 days, with only 12.5% 
+of patients surviving beyond 2 years, reflecting the poor prognosis 
+associated with advanced lung cancer.
+
+2. Female patients showed significantly better survival than male patients 
+(log-rank p = 0.0013), a finding that remained significant after adjusting 
+for confounders in the Cox model (HR = 0.58, p < 0.001).
+
+3. ECOG performance status was the strongest independent prognostic factor 
+(HR = 1.59, p < 0.001), confirming that functional status at diagnosis is 
+a critical determinant of survival outcomes.
+
+4. Age was not a significant predictor of survival in this model 
+(HR = 1.01, p = 0.232), suggesting that functional status and sex are 
+more important prognostic factors than age alone in this patient population.
+
+**Limitations:**
+
+- The dataset contains missing values in several variables, particularly 
+`meal.cal` (20.6% missing), which were excluded from the analysis
+- The study population is limited to North American patients from a single 
+clinical trial, which may limit generalizability
+- Additional variables such as tumor histology, stage, and treatment 
+information were not available in this dataset
+
+**Future directions:**
+
+- Include additional clinical and molecular variables to improve model 
+performance
+- Validate the model in an independent dataset
+- Explore machine learning approaches for survival prediction
